@@ -1,0 +1,477 @@
+---
+- hosts: all
+  remote_user: "{{ lookup('env','USER') }}"
+  become: true
+  become_user: root
+  gather_facts: yes
+  vars:
+    month_dict: { '01': "Jan", '02': "Feb", '03': "Mar", '04': "Apr", '05': "May", '06': "Jun", '07': "Jul", '08': "Aug", '09': "Sep", '10': "Oct", '11': "Nov", '12': "Dec" }
+    month_num: "{{ lookup('pipe', 'date +%m') }}"
+    month_char: |-
+          {% if month_dict.has_key(month_num) %}
+          {{month_dict[month_num]|trim}}
+          {% endif %}
+    file_name: /var/data/green_fields_{{ month_char |trim}}
+
+  tasks:
+    - name: "Getting current timestamp"
+      tags: "rerun"
+      set_fact:
+        timestamp_fact: "{{ lookup('pipe', 'date +%Y-%m-%d-%H-%M-%S') }}"
+        timestamp_0: "{{ lookup('pipe', 'date +%Y-%m-%d') }}"
+
+    - name: set facts
+      set_fact:
+        _name: "{{ inventory_hostname[5] + inventory_hostname[6] }}"
+
+    - name: set fact for server type
+      set_fact:
+        _dirs: |-
+          {% if _name == 'ts' %}
+          {{ 'TEST' }}
+          {% elif _name == 'dv' %}
+          {{ 'DEV' }}
+          {% elif _name == 'dm' %}
+          {{ 'DEV' }}
+          {% elif _name == 'qa' %}
+          {{ 'QA' }}
+          {% elif _name == 'pd' %}
+          {{ 'PROD' }}
+          {% elif _name == 'dr' %}
+          {{ 'DR' }}
+          {% else %}
+          {{ 'other' }}
+          {% endif %}
+
+    - name: set fact for server type
+      set_fact:
+          _dir: "{{ _dirs | regex_replace('\n')}}"
+
+    - name: Create directory according to the environment
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}"
+        state: directory
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Check the service status
+      tags: "service"
+      GPC_service:
+        name: all
+        query: True
+        state: present
+      register: serstatus
+
+    - name: Create a file service.
+      tags: "service"
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/services.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the  output to the newly created file
+      tags: "service"
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/services.txt"
+        line: "{{ serstatus.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Check the Installed RPM packages Info
+      GPC_rpm:
+        package: all
+        query: True
+        state: present
+      register: rpminfo
+
+    - name: Create a file rpm info.
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/rpminfo.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the  output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/rpminfo.txt"
+        line: "{{ rpminfo.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Create a Directory with Server name
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}"
+        state: directory
+        mode: 744
+      delegate_to: "127.0.0.1"
+
+    - name: Chech VCS cluster status
+      GPC_vcs_hastatus:
+        name: status
+        state: present
+      ignore_errors: true
+      register: vcs_cluster
+
+    - name: Create a file to save cluster output
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/VCS_cluster.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+      when: vcs_cluster.rc == 0
+
+    - name: Copy the VCS cluster output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/VCS_cluster.txt"
+        line: "{{ vcs_cluster.stdout }}"
+      delegate_to: "127.0.0.1"
+      when: vcs_cluster.rc == 0
+
+    - name: Check Redhat cluster status
+      command: clustat
+      register: red_cluster
+      ignore_errors: true
+
+    - name: Create a file to save cluster output
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/Redht_cluster.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+      when: red_cluster.rc == 0
+
+    - name: Copy the VCS cluster output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/Redht_cluster.txt"
+        line: "{{ red_cluster.stdout }}"
+      delegate_to: "127.0.0.1"
+      when: red_cluster.rc == 0
+
+    - name: Get server boot time
+      command: uptime
+      register: server_uptime
+
+    - name: Create a file to save the kernal and boot time output
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/server_uptime.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the output of Kernal and boot time to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/server_uptime.txt"
+        line: "{{ server_uptime.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Checking the server IP
+      GPC_net_interface.py:
+        name: status
+      register: net_route
+
+    - name: Checking the route table
+      GPC_net_static_route:
+        name: show
+      register: rout
+
+    - name: Create a file to save the Networking IP and route table Info
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/networking.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the output of networking to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/networking.txt"
+        line: "{{ net_route.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the output of Route Table to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/networking.txt"
+        line: "{{ rout.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Create a directory to save the disk information
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk"
+        state: directory
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Get Disk FS
+      GPC_df:
+        flag: ThP
+      register: dfs
+
+    - name: Create a file inside Disk folder to save the disk info
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/disk_fs.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the Disk output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/disk_fs.txt"
+        line: "{{ dfs.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Get fstab entries
+      GPC_cat:
+        file: /etc/fstab
+      register: fstinfo
+
+    - name: Create a file inside Disk folder to save the fstab info
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/fstabinfo.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the fstab output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/fstabinfo.txt"
+        line: "{{ fstinfo.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: List of block devices
+      command: lsblk
+      register: blkdev
+      ignore_errors: true
+      delegate_to: "127.0.0.1"
+
+    - name: Create a file to save blkdev output
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/block_devices.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the Disk output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/block_devices.txt"
+        line: "{{ blkdev.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: List of Volume Groups
+      GPC_pvs:
+        name: listdevices
+      register: lvm_out
+      delegate_to: "127.0.0.1"
+
+    - name: Create a file inside Disk folder to save lvm info
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/lvm_out.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/lvm_out.txt"
+        line: "{{ lvm_out.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Check Read Only FS
+      GPC_cat:
+        file: /proc/mounts
+      register: ro_out
+      delegate_to: "127.0.0.1"
+
+    - name: Create a file inside Disk folder to save the disk info
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/proc_mounts.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the Disk output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/proc_mounts.txt"
+        line: "{{ ro_out.stdout }}"
+      delegate_to: "127.0.0.1"
+
+#    - name: Check the NFS
+#      GPC_mount:
+#        path: all
+#        fstype: nfs
+#        state: present
+#      register: nfs
+    - name: Check the NFS
+      shell: mount -l | grep nfs
+      register: nfs
+
+    - name: Create a file to save the output of NFS.
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/NFS_automnt_output.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the output of NFS and automount to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/disk/NFS_automnt_output.txt"
+        line: "{{ nfs.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Create a log directory
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/log"
+        state: directory
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: check host entries
+      GPC_cat:
+        file: /etc/hosts
+      register: hostentries
+
+    - name: Create a file to save the output of hostentries.
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/log/host_entries.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the output hosts to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/log/host_entries.txt"
+        line: "{{ hostentries.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: check sysconfig_network
+      GPC_cat:
+        file: /etc/sysconfig/network
+      register: sysnetwork
+
+    - name: Create a file to save the output of sysconfig_network.
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/log/sysconfig_network.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the output of network to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/log/sysconfig_network.txt"
+        line: "{{ sysnetwork.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Create a directory for network scripts
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/log/networkscripts"
+        state: directory
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the network_scripts files to Log directory
+      copy:
+        src: /etc/sysconfig/network-scripts/
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/log/network-scripts/"
+      delegate_to: "127.0.0.1"
+
+    - name: Create a directory for satellite information
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/satinfo"
+        state: directory
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Check the satellite environment
+      GPC_redhat_subscription:
+        name: identity
+      register: identity
+
+    - name: Create a file to save subscription identity.
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/satinfo/identity.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the  output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/satinfo/identity.txt"
+        line: "{{ identity.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Check the satellite status
+      GPC_redhat_subscription:
+        name: list
+      register: sublist
+
+    - name: Create a file to save subscription list.
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/satinfo/sublist.txt"
+        state: touch
+        mode: 0755
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the  output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/satinfo/sublist.txt"
+        line: "{{ sublist.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: yum update download-only
+      tags: "downloadonly"
+      yum:
+        name: '*'
+        state: latest
+        update_cache: yes
+        download_only : yes
+      register: yum_download
+      ignore_errors: true
+
+    - name: Copy yum download only output to file
+      ignore_errors: true
+      tags: "downloadonly"
+      lineinfile:
+        dest: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}/downloadonly.txt"
+        create: yes
+        line: "{{ yum_download }}"
+      delegate_to: "127.0.0.1"
+
+    - name: to check yum update errors
+      tags: "yumerrors"
+      GPC_yum:
+        name: assumeno
+        state: latest
+      register: upd
+      ignore_errors: yes
+
+    - name: debug yum update errors
+      tags: "yumerrors"
+      debug:
+        msg: "{{ upd }}"
+
+    - name: create list of server having error
+      tags: "yumerrors"
+      lineinfile:
+        dest: "/tmp/yum_update_issue_list_{{ lookup('env','USER') }}_{{ ansible_date_time.date }}"
+        create: yes
+        line: "{{inventory_hostname}}"
+      when: upd != ''
+      delegate_to: "127.0.0.1"
+
+    - name: Start Puppet service
+      service:
+        name: puppet
+        state: started
+        enabled: yes
+      tags: "puppet"
+
+    - name: Start PXP-Puppet agent
+      service:
+        name: pxp-agent
+        state: started
+        enabled: yes
+      tags: "puppet"
+
+    - name: Changing permissions
+      file:
+        path: "{{ file_name }}/{{ _dir }}_{{ timestamp_0 }}/{{ inventory_hostname + '_' + timestamp_fact }}"
+        mode: 0755
+      delegate_to: "127.0.0.1"
+      tags: "puppet"
