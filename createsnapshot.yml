@@ -3,38 +3,14 @@
   gather_facts: False
   connection: local
   remote_user: "{{ lookup('env','USER') }}"
-  vars:
-   snapshot_description: "Snapshot for Patching"
-   machines: "{{ inventory_hostname | regex_replace('.genpt.*') }}"
-   vcenters: { 'au': "atlvcenter.genpt.net", 'du': "dalvcenter.genpt.net" }
-   datacenters: { 'au': "Atlanta", 'du': "Dallas" }
-   timestamp_fact: "{{ lookup('pipe', 'date +%m-%d-%Y') }}"
-   snapshot_name: "Before_Patching_{{ timestamp_fact }}"
-  vars_files:
-    - ./vars/vars_file.yml
-
-  tasks:
-  - name:
-    when: "'a' in inventory_hostname.0"
-    set_fact:
-      hostname: "{{ vcenters['au'] }}"
-      datacenter: "{{ datacenters['au'] }}"
-    tags: find_folder
-
-  - name:
-    when: "'d' in inventory_hostname.0"
-    set_fact:
-      hostname: "{{ vcenters['du'] }}"
-      datacenter: "{{ datacenters['du'] }}"
-    tags: find_folder
-
+  tasks: 
   - name: Find the vm folder
     vmware_guest_find:
       hostname: "{{ hostname }}"
       username: "{{ username }}"
       password: "{{ password }}"
       validate_certs: False
-      name: "{{ machines }}"
+      name: "{{ inventory_hostname }}"
     delegate_to: localhost
     register: vm_folder
     tags: find_folder
@@ -51,58 +27,24 @@
       password: "{{ password }}"
       validate_certs: False
       folder: "{{ vm_folder }}"
-      name: "{{ machines }}"
+      name: "{{ inventory_hostname }}"
       state: present
       snapshot_name: "{{ snapshot_name }}"
       description: "{{ snapshot_description }}"
     delegate_to: localhost
-    register: vm
-
-  - name: Find VM_Snapshot Task
-    debug: var=vm
-
-  - name: Creating inventory file
-    lineinfile:
-      dest: "/tmp/snapshot_remove_{{ lookup('env','USER') }}_{{ lookup ('pipe','date +%Y-%m-%d') }}"
-      create: yes
-      line: "{{ machines }}"
-    when: vm.changed == true
-    delegate_to: localhost
-
-  - name: Defining Snapshot deletion time
-    command: "date +'%M %H %d %m' -d ' +2 days'"
-    delegate_to: localhost
-    register: result
-
-  - name: timestamp for cron job
-    set_fact:
-      timestamp: "{{ result.stdout.split() }}"
-
-  - name: display timestamp
-    debug: msg= "{{ timestamp }}"
-
-  - name: Creating Cronjob
-    cron:
-      name: "Job for Snapshot Deletion_{{ lookup('env','USER') }}_{{ lookup ('pipe','date +%Y-%m-%d') }}"
-      minute: "{{ timestamp.0 }}"
-      hour: "{{ timestamp.1 }}"
-      day: "{{ timestamp.2 }}"
-      month: "{{ timestamp.3 }}"
-      job: "ansible-playbook ./ansible/removesnapshot.yml -i /tmp/snapshot_remove_{{ lookup ('env','USER') }}_{{ lookup ('pipe','date +%Y-%m-%d') }} --extra-vars 'snapshot_name=\"{{ snapshot_name }}\"' > /tmp/snapshot_remove_{{ lookup ('env','USER') }}_{{ lookup ('pipe','date +%Y-%m-%d') }}_status.log"
-      user: "{{ lookup('env','user') }}"
-    delegate_to: localhost
+    register: vm 
 
   - name: Create a status file
     file:
       path: "/tmp/snapshot_creation_status_{{ lookup('env','USER') }}_{{lookup ('pipe','date +%Y-%m-%d') }}"
       state: touch
       mode: 0744
-    delegate_to: "127.0.0.1"
+    delegate_to: localhost
 
   - name: Adding snapshot created servers to status file
     lineinfile:
       dest: "/tmp/snapshot_creation_status_{{ lookup('env','USER') }}_{{lookup ('pipe','date +%Y-%m-%d') }}"
-      line: "{{ machines }}"
+      line: "{{ inventory_hostname }}"
     when: vm.changed == True
     delegate_to: localhost
 
@@ -110,16 +52,10 @@
     mail:
       subject: Snapshot Creation Status
       to:
-         - Praveen_Mohandass@genpt.com
-         - Dhinakaran_S@genpt.com
-         - GaneshMoorthy_R@genpt.com
-         - JaiGanesh_Suryanarayanan@genpt.com
-         - RajKumar_Govindasamy2@genpt.com
-         - Sathish_Kumar@genpt.com
-         - Brett_Brubaker@genpt.com
-         - Philip_Hempel@genpt.com
+         - mymail@organization.com
+         - peter@ABCcompany.com
       attach:
       - "/tmp/snapshot_creation_status_{{ lookup('env','USER') }}_{{lookup ('pipe','date +%Y-%m-%d') }}"
-      body: " Hi Team,\n\nSnapshots have been created for the servers attached with this email.\n\nThanks and Regards,\nLinux Patching Team"
+      body: " Hi Team,\n\nSnapshots have been created for the servers attached with this email.\n"
     delegate_to: localhost
     run_once: True
