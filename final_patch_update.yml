@@ -1,0 +1,136 @@
+---
+- hosts: all
+  remote_user: "{{ lookup('env','USER') }}"
+  become: true
+  become_user: root
+  gather_facts: "no"
+  vars:
+    month_dict: { '01': "Jan", '02': "Feb", '03': "Mar", '04': "Apr", '05': "May", '06': "Jun", '07': "Jul", '08': "Aug", '09': "Sep", '10': "Oct", '11': "Nov", '12': "Dec" }
+    month_num: "{{ lookup('pipe', 'date +%m') }}"
+    month_char: |-
+          {% if month_dict.has_key(month_num) %}
+          {{month_dict[month_num]|trim}}
+          {% endif %}
+    date_char: "{{ lookup('pipe', 'date +%d') }}"
+    year_char: "{{ lookup('pipe', 'date +%y') }}"
+    file_name: /var/data/pre_patchdetails/{{ date_char + month_char |trim + year_char }}/{{ inventory_hostname }}
+  tasks:
+    - name: "Getting current timestamp"
+      tags: folder_name
+      set_fact:
+        timestamp_fact: "{{ lookup('pipe', 'date +%Y-%m-%d-%H-%M-%S') }}"
+
+    - name:
+      tags: folder_name
+      debug:
+        msg: "{{ file_name }}_{{ timestamp_fact }}"
+
+    - debug:
+        var: "{{ timestamp_fact }}"
+
+    - name: Reboot the server
+      reboot:
+        test_command: uptime
+      tags: pre_reboot
+
+    - name: Create a Directory with Server name
+      tags: folder_name
+      file:
+        path: "{{ file_name }}_{{ timestamp_fact }}"
+        state: directory
+        mode: 744
+      delegate_to: "127.0.0.1"
+
+    - name: Check the security notices
+      GPC_yum:
+        name: updateinfo
+        show: security
+      register: secnotice
+
+    - name: Create a file for security notices.
+      file:
+        path: "{{ file_name }}_{{ timestamp_fact }}/security_notices.txt"
+        state: touch
+        mode: 0744
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the  output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}_{{ timestamp_fact }}/security_notices.txt"
+        line: "{{ secnotice.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: List the CVES
+      GPC_yum:
+        name: updateinfo
+        show: cves
+      register: listcves
+
+    - name: Create a file to list cves.
+      file:
+        path: "{{ file_name }}_{{ timestamp_fact }}/list_cves.txt"
+        state: touch
+        mode: 0744
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the  output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}_{{ timestamp_fact }}/list_cves.txt"
+        line: "{{ listcves.stdout }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Install and update security patches
+      yum:
+        name: '*'
+        state: latest
+      register: updatesecurity
+      ignore_errors: true
+
+    - name: Create a file to store installation logs.
+      file:
+        path: "{{ file_name }}_{{ timestamp_fact }}/patchupdate_log.txt"
+        state: touch
+        mode: 0744
+      delegate_to: "127.0.0.1"
+
+    - name: Copy the  output to the newly created file
+      lineinfile:
+        dest: "{{ file_name }}_{{ timestamp_fact }}/patchupdate_log.txt"
+        line: "{{ updatesecurity }}"
+      delegate_to: "127.0.0.1"
+
+    - name: Reboot the server
+      reboot:
+        test_command: uptime
+
+    - name: Get latest kernel version
+      GPC_yum:
+        name: kernel
+        show: latest
+        state: present
+      delegate_to: "127.0.0.1"
+      register: latest_kern
+      tags: post_check
+
+    - name: Get server boot time
+      command: hostname
+      register: host_name
+      tags: post_check
+
+    - name: Get running kernel-details
+      command: uname -r
+      register: run_kern
+      tags: post_check
+
+    - name: Get serverup time
+      command: uptime |awk '{print $3,$4}'
+      register: up_time
+      tags: post_check
+
+    - name: copy the output to newfile
+      lineinfile:
+        dest: "/tmp/kern_val_{{ lookup('env','USER') }}_{{ lookup('pipe', 'date +%Y-%m-%d-%H-%M-%S') }}"
+        create: "yes"
+        line: "{{host_name.stdout, latest_kern.stdout, run_kern.stdout, up_time.stdout }}"
+      delegate_to: "127.0.0.1"
+      tags: post_check
