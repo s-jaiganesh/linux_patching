@@ -1,0 +1,10 @@
+---
+- hosts: all
+  gather_facts: false
+  tasks:
+
+    - name: yum updateinfo list security all
+      yum_patchlist:
+        name: updateinfo
+        show: security
+      register: result
